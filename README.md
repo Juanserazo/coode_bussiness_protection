@@ -1,6 +1,6 @@
 # COODE BUSSINES PROTECTION
 
-COODE BUSSINES PROTECTION is a managed cybersecurity project for small and midsize businesses in Colombia and Mexico. The MVP is a read-only Python CLI that assesses an authorized domain's email and website configuration and produces Markdown and JSON reports.
+COODE BUSSINES PROTECTION is a managed cybersecurity project for small and midsize businesses in Colombia and Mexico. The MVP is a read-only Python CLI that assesses an authorized domain's email and website configuration and produces PDF and JSON reports.
 
 ## Installation
 
@@ -73,7 +73,7 @@ The DNS checks use `dnspython`. The web checks use `httpx` and Python's `ssl` an
 
 ## Reading the reports
 
-Each run creates a Markdown file and a JSON file named after the email domain and a UTC timestamp. The Markdown report explains the check and its evidence in Spanish and includes remediation and verification steps where applicable. The JSON retains the existing field names and status values for integrations.
+Each run creates a portrait PDF and a JSON file named after the email domain and a UTC timestamp. The PDF starts with a status summary and lists the evidence for each email and web check in Spanish. It includes suggested actions and verification steps where applicable. The JSON retains the existing field names and status values for integrations.
 
 | Status in the report | Meaning |
 |---|---|
@@ -91,7 +91,7 @@ The report reflects public DNS records and the website response observed at the 
 | `coode_protection/` | Shared finding model, DNS and web checks, orchestration, and report generation. |
 | `scripts/` | Internal tools. Run them from the project root with `python -m scripts.module_name`. |
 | `tests/` | Automated tests with simulated network responses. |
-| `reports/` | Local Markdown and JSON output. Override the directory with `--output`. |
+| `reports/` | Local PDF and JSON output. Override the directory with `--output`. |
 
 New tools can reuse `run_diagnostic` from `coode_protection.diagnostic` and `write_reports` from `coode_protection.reports`. Git ignores local reports, virtual environments, caches, and PyCharm project settings.
 

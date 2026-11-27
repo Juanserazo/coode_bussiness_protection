@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, Mock, call, patch
 import dns.exception
 import httpx
 import pytest
+from pypdf import PdfReader
 
 import coode_diagnostic
 from coode_protection import dns_checks, reports, web_checks
@@ -93,7 +94,7 @@ def test_marks_monitoring_only_dmarc_for_review():
     assert finding.verification
 
 
-def test_writes_both_formats_with_the_existing_schema_and_heading(tmp_path):
+def test_writes_portrait_pdf_and_json_with_the_existing_schema(tmp_path):
     findings = [
         Finding("MX", VERIFIED, "10 mail.example.com."),
         Finding(
@@ -105,13 +106,12 @@ def test_writes_both_formats_with_the_existing_schema_and_heading(tmp_path):
         Finding("HTTPS", VERIFIED, "HTTP 200."),
     ]
 
-    json_path, markdown_path = reports.write_reports(
+    json_path, pdf_path = reports.write_reports(
         DOMAIN, WEB_HOST, findings, tmp_path / "reports"
     )
 
-    assert json_path.stem == markdown_path.stem
+    assert json_path.stem == pdf_path.stem
     data = json.loads(json_path.read_text(encoding="utf-8"))
-    markdown = markdown_path.read_text(encoding="utf-8")
     assert set(data) == {"dominio", "sitio", "fecha_utc", "hallazgos"}
     assert data["dominio"] == DOMAIN
     assert data["sitio"] == WEB_HOST
@@ -124,16 +124,44 @@ def test_writes_both_formats_with_the_existing_schema_and_heading(tmp_path):
         "accion": "Consultar al administrador.",
         "verificacion": "Repetir la prueba.",
     }
-    assert markdown.splitlines()[0] == "# COODE BUSSINES PROTECTION"
-    for control in CONTROLS:
-        assert f"#### {control} ·" in markdown
-    for field in ("Qué se consultó.", "Qué comprueba.", "Evidencia."):
-        assert markdown.count(f"**{field}**") == len(CONTROLS)
-    assert "| Verificado | 3 |" in markdown
-    assert "| Requiere revisión | 1 |" in markdown
-    assert "| No verificado | 1 |" in markdown
-    assert "**Acción sugerida.**" in markdown
-    assert "**Cómo comprobar el cambio.**" in markdown
+    pdf = PdfReader(pdf_path)
+    assert pdf_path.suffix == ".pdf"
+    assert len(pdf.pages) == 3
+    assert all((page.mediabox.width, page.mediabox.height) == (612, 792) for page in pdf.pages)
+    overview = " ".join(pdf.pages[0].extract_text().split())
+    assert "COODE BUSSINES PROTECTION" in overview
+    assert DOMAIN in overview and WEB_HOST in overview
+    assert "Fecha de revisión" in overview and "UTC" in overview
+    assert "Verificado 3" in overview
+    assert "Requiere revisión 1" in overview
+    assert "No verificado 1" in overview
+    assert all(control in overview.split() for control in CONTROLS)
+    mail_page, web_page = [page.extract_text() for page in pdf.pages[1:]]
+    assert "Correo y autenticación" in mail_page
+    assert "Sitio web" in web_page
+    assert f"_dmarc.{DOMAIN}" in mail_page
+    assert f"https://{WEB_HOST}/" in web_page
+    details = mail_page + web_page
+    for field in ("Qué se consultó", "Qué comprueba", "Evidencia"):
+        assert details.count(field) == len(CONTROLS)
+    assert "Acción sugerida" in details
+    assert "Cómo comprobar el" in details
+    assert "Consultar al administrador." in details
+    assert "Siguiente paso" in details
+
+
+def test_long_evidence_spans_pdf_pages_without_truncation(tmp_path):
+    evidence = "<first> " + " ".join(f"record-{n:03}" for n in range(600)) + " <last>"
+    _, pdf_path = reports.write_reports(
+        DOMAIN, WEB_HOST, [Finding("SPF", VERIFIED, evidence)], tmp_path
+    )
+
+    pdf = PdfReader(pdf_path)
+    assert len(pdf.pages) > 2
+    details = " ".join(page.extract_text() for page in pdf.pages[1:])
+    assert "<first>" in details
+    assert "<last>" in details
+    assert all(f"record-{n:03}" in details for n in range(600))
 
 
 def test_collision_preserves_existing_report_and_removes_partial_output(tmp_path, monkeypatch):
@@ -141,13 +169,13 @@ def test_collision_preserves_existing_report_and_removes_partial_output(tmp_path
     clock = Mock()
     clock.now.return_value = timestamp
     monkeypatch.setattr(reports, "datetime", clock)
-    existing = tmp_path / f"{DOMAIN}_{timestamp:%Y%m%dT%H%M%S%fZ}.md"
-    existing.write_text("existing report", encoding="utf-8")
+    existing = tmp_path / f"{DOMAIN}_{timestamp:%Y%m%dT%H%M%S%fZ}.pdf"
+    existing.write_bytes(b"existing PDF")
 
     with pytest.raises(FileExistsError):
         reports.write_reports(DOMAIN, WEB_HOST, [], tmp_path)
 
-    assert existing.read_text(encoding="utf-8") == "existing report"
+    assert existing.read_bytes() == b"existing PDF"
     assert list(tmp_path.iterdir()) == [existing]
 
 
@@ -169,7 +197,7 @@ def test_cli_accepts_web_host_output_and_timeout(tmp_path, monkeypatch, capsys, 
     coode_diagnostic.main()
 
     paths = [Path(line) for line in capsys.readouterr().out.splitlines()]
-    assert [path.suffix for path in paths] == [".json", ".md"]
+    assert [path.suffix for path in paths] == [".json", ".pdf"]
     assert all(path.parent == folder and path.is_file() for path in paths)
     mock_diagnostic.assert_called_once_with(DOMAIN, WEB_HOST, 2)
 
