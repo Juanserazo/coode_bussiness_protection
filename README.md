@@ -4,30 +4,15 @@ COODE BUSSINES PROTECTION is a managed cybersecurity project for small and midsi
 
 ## Installation
 
-Open a terminal at the project root. Use Python 3.12, the version tested for this project.
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/) and open PowerShell, Git Bash, or Bash on Linux, macOS, or WSL at the project root. Use Python 3.12, the version tested for this project. uv creates the virtual environment automatically.
 
-### PowerShell on Windows
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```sh
+uv sync --locked --python 3.12 --no-dev
 ```
 
-### Bash on Linux, macOS, or WSL
+`pyproject.toml` declares the dependencies. `uv.lock` records the resolved versions, including transitive dependencies. Commit both files when dependencies change.
 
-```bash
-python3 -m venv .venv
-./.venv/bin/python -m pip install -r requirements.txt
-```
-
-### Git Bash on Windows
-
-```bash
-python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r requirements.txt
-```
-
-PowerShell and Git Bash can share the Windows `.venv`. If you use the same project directory from Windows and WSL, create a separate WSL environment with `python3 -m venv .venv-wsl` and use `./.venv-wsl/bin/python` for the Bash commands. Recreate each environment on its own operating system using `requirements.txt`.
+PowerShell and Git Bash can share the Windows `.venv`. If you also use the same checkout from WSL, run `export UV_PROJECT_ENVIRONMENT=.venv-wsl` in the WSL shell before running `uv sync` or `uv run`. When configuring PyCharm, select `.venv\Scripts\python.exe` on Windows or `.venv/bin/python` on Linux and macOS. For the separate WSL environment, use `.venv-wsl/bin/python`.
 
 ## Running the diagnostic
 
@@ -38,7 +23,7 @@ Run `coode_diagnostic.py` with no arguments from a terminal or through **Run** i
 Press Enter to accept `example.com` as the email domain. Press Enter again to use the same name for TLS and HTTPS. Use `--interactive` to keep the prompts while setting options such as `--output` or `--timeout`.
 
 ```powershell
-.\.venv\Scripts\python.exe .\coode_diagnostic.py --interactive --output .\reports
+uv run --locked --no-dev python .\coode_diagnostic.py --interactive --output .\reports
 ```
 
 ### Command-line arguments
@@ -48,22 +33,22 @@ Each shell example shows a test with `example.com` and an internal pilot run. Ru
 #### PowerShell on Windows
 
 ```powershell
-.\.venv\Scripts\python.exe .\coode_diagnostic.py example.com --output .\reports
-.\.venv\Scripts\python.exe .\coode_diagnostic.py coode.tech --web-host www.coode.tech --output .\reports
+uv run --locked --no-dev python .\coode_diagnostic.py example.com --output .\reports
+uv run --locked --no-dev python .\coode_diagnostic.py coode.tech --web-host www.coode.tech --output .\reports
 ```
 
 #### Bash on Linux, macOS, or WSL
 
 ```bash
-./.venv/bin/python ./coode_diagnostic.py example.com --output ./reports
-./.venv/bin/python ./coode_diagnostic.py coode.tech --web-host www.coode.tech --output ./reports
+uv run --locked --no-dev python ./coode_diagnostic.py example.com --output ./reports
+uv run --locked --no-dev python ./coode_diagnostic.py coode.tech --web-host www.coode.tech --output ./reports
 ```
 
 #### Git Bash on Windows
 
 ```bash
-./.venv/Scripts/python.exe ./coode_diagnostic.py example.com --output ./reports
-./.venv/Scripts/python.exe ./coode_diagnostic.py coode.tech --web-host www.coode.tech --output ./reports
+uv run --locked --no-dev python ./coode_diagnostic.py example.com --output ./reports
+uv run --locked --no-dev python ./coode_diagnostic.py coode.tech --web-host www.coode.tech --output ./reports
 ```
 
 | Argument | Purpose |
@@ -112,12 +97,11 @@ New tools can reuse `run_diagnostic` from `coode_protection.diagnostic` and `wri
 
 ## Running the tests
 
-Run the suite from the project root using your virtual environment. The automated tests cover all five controls, the CLI, and the report formats without network access.
+The development environment includes pytest. The suite covers all five controls, the CLI, and the report formats with simulated network responses.
 
-| Shell | Command |
-|---|---|
-| PowerShell on Windows | `.\.venv\Scripts\python.exe -m unittest discover -s tests -v` |
-| Bash on Linux, macOS, or WSL | `./.venv/bin/python -m unittest discover -s tests -v` |
-| Git Bash on Windows | `./.venv/Scripts/python.exe -m unittest discover -s tests -v` |
+```sh
+uv sync --locked --python 3.12
+uv run --locked pytest -v
+```
 
 Use `example.com` for a separate live test. Check the statuses in the report to see which network checks completed.
