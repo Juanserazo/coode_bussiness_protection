@@ -1,0 +1,9 @@
+/.venv/
+/.venv-*/
+/reports/
+# Legacy output from older versions.
+/reportes/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+/.idea/
