@@ -6,6 +6,7 @@ from datetime import datetime
 from functools import partial
 from importlib.resources import files
 from io import BytesIO
+from textwrap import shorten
 from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
@@ -35,6 +36,7 @@ for font_name, filename in ((REGULAR_FONT, "Vera.ttf"), (BOLD_FONT, "VeraBd.ttf"
 PAGE_WIDTH, PAGE_HEIGHT = letter
 MARGIN = 46
 CONTENT_WIDTH = PAGE_WIDTH - 2 * MARGIN
+OVERVIEW_HEIGHT = PAGE_HEIGHT - 249
 NAVY = colors.HexColor("#0D1B2A")
 NAVY_PANEL = colors.HexColor("#142838")
 INK = colors.HexColor("#102B3C")
@@ -64,6 +66,15 @@ CONTROL_NAMES = {
     "HTTPS": "Respuesta del sitio",
 }
 MAIL_CONTROLS = {"MX", "SPF", "DMARC"}
+
+REVIEW_ORDER = {"DMARC": 0, "SPF": 1, "MX": 2, "TLS": 3, "HTTPS": 4}
+REVIEW_IMPACT = {
+    "DMARC": "Afecta la política contra la suplantación del remitente.",
+    "SPF": "Afecta la identificación de remitentes autorizados.",
+    "MX": "Puede afectar la recepción del correo.",
+    "TLS": "Puede afectar la confianza de los visitantes en la conexión.",
+    "HTTPS": "Puede afectar el acceso a la página principal.",
+}
 
 
 def describe_controls(domain: str, web_host: str) -> dict[str, tuple[str, str]]:
@@ -107,6 +118,7 @@ def _style(name, size, leading, ink=INK, bold=False, **options):
 BODY = _style("Body", 10.5, 14, MUTED)
 SMALL = _style("Small", 9, 12, MUTED)
 FIELD = _style("Field", 10, 14, TEAL_DARK, bold=True)
+PRIORITY_LABEL = _style("Priority label", 9, 12, TEAL_DARK, bold=True)
 VALUE = _style("Value", 11, 14, bold=True)
 HEADING = _style("Heading", 21, 25, bold=True, keepWithNext=True)
 SUBHEADING = _style("Subheading", 14, 18, bold=True, keepWithNext=True)
@@ -128,7 +140,7 @@ def _paragraph(value: str, style: ParagraphStyle) -> Paragraph:
 
 
 def _page_background(canvas, document, *, overview):
-    header_height = 190 if overview else 112
+    header_height = 184 if overview else 112
     header_bottom = PAGE_HEIGHT - header_height
     canvas.saveState()
     canvas.setFillColor(PAPER)
@@ -196,8 +208,8 @@ def _metadata(domain: str, web_host: str, timestamp: datetime) -> Table:
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("LEFTPADDING", (0, 0), (-1, -1), 12),
         ("RIGHTPADDING", (0, 0), (-1, -1), 12),
-        ("TOPPADDING", (0, 0), (-1, -1), 6),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
     ]))
     return table
 
@@ -258,6 +270,47 @@ def _control_summary(findings: Sequence[Finding]) -> Table:
     return table
 
 
+def _prioritized_findings(findings: Sequence[Finding]) -> list[Finding]:
+    actionable = [
+        finding for finding in findings
+        if finding.status == NEEDS_REVIEW and finding.action
+    ]
+    return sorted(
+        actionable,
+        key=lambda finding: (
+            finding.reason_code != "tls_certificate_invalid",
+            REVIEW_ORDER[finding.control],
+        ),
+    )[:3]
+
+
+def _priority_card(finding: Finding) -> Table:
+    rows = [[
+        _paragraph(finding.control, PRIORITY_LABEL),
+        _paragraph(REVIEW_IMPACT[finding.control], SMALL),
+    ]]
+    for label, value in (
+        ("Evidencia", finding.evidence),
+        ("Acción", finding.action),
+        ("Verificación", finding.verification),
+    ):
+        if value:
+            summary = shorten(value, width=92, placeholder="...")
+            rows.append([_paragraph(label, PRIORITY_LABEL), _paragraph(summary, SMALL)])
+    table = Table(rows, colWidths=[82, CONTENT_WIDTH - 82], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), WHITE),
+        ("BACKGROUND", (0, 0), (-1, 0), STATUS_COLORS[NEEDS_REVIEW][0]),
+        ("LINEBEFORE", (0, 0), (0, 0), 3, STATUS_COLORS[NEEDS_REVIEW][1]),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    return table
+
+
 def _control_details(finding: Finding, target: str, criterion: str) -> Table:
     fields = [
         ("Qué se consultó", target),
@@ -302,7 +355,7 @@ def render_pdf(
         buffer, pagesize=letter, title=f"{PROJECT_NAME} - {domain}", author=PROJECT_NAME,
     )
     frames = [
-        Frame(MARGIN, 44, CONTENT_WIDTH, PAGE_HEIGHT - 255,
+        Frame(MARGIN, 44, CONTENT_WIDTH, OVERVIEW_HEIGHT,
               leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0),
         Frame(MARGIN, 44, CONTENT_WIDTH, PAGE_HEIGHT - 174,
               leftPadding=0, rightPadding=0, topPadding=0, bottomPadding=0),
@@ -313,31 +366,52 @@ def render_pdf(
     ])
     story = [
         _metadata(domain, web_host, timestamp),
-        Spacer(1, 23),
+        Spacer(1, 18),
         _paragraph("Resumen del diagnóstico", HEADING),
-        Spacer(1, 12),
+        Spacer(1, 8),
         _status_cards(findings),
     ]
+    summary = []
     if findings:
-        story.extend([
-            Spacer(1, 23),
+        summary = [
+            Spacer(1, 14),
             _paragraph("Estado por control", SUBHEADING),
-            Spacer(1, 9),
+            Spacer(1, 7),
             _control_summary(findings),
+        ]
+    priorities = _prioritized_findings(findings)
+    if priorities:
+        story.extend([
+            Spacer(1, 12),
+            _paragraph("Acciones prioritarias", SUBHEADING),
+            Spacer(1, 6),
         ])
-    story.extend([
-        Spacer(1, 15),
+        for finding in priorities:
+            story.extend([_priority_card(finding), Spacer(1, 4)])
+    note = [
+        Spacer(1, 7),
         _paragraph("El diagnóstico refleja la configuración pública observada en esta ejecución.", SMALL),
-    ])
+    ]
+    move_summary = bool(priorities) and (
+        sum(item.wrap(CONTENT_WIDTH, OVERVIEW_HEIGHT)[1] for item in story + summary + note)
+        > OVERVIEW_HEIGHT
+    )
+    if not move_summary:
+        story.extend(summary)
+    story.extend(note)
 
     scope = describe_controls(domain, web_host)
     mail = [finding for finding in findings if finding.control in MAIL_CONTROLS]
     web = [finding for finding in findings if finding.control not in MAIL_CONTROLS]
     for title, group in (("Correo y autenticación", mail), ("Sitio web", web)):
         if group:
-            story.extend([PageBreak(), _paragraph(title, HEADING), Spacer(1, 13)])
+            story.append(PageBreak())
+            story.extend([_paragraph(title, HEADING), Spacer(1, 13)])
             for finding in group:
                 story.extend([_control_details(finding, *scope[finding.control]), Spacer(1, 14)])
+
+    if move_summary:
+        story.extend(summary)
 
     document.build(story, canvasmaker=partial(Canvas, initialFontName=REGULAR_FONT))
     return buffer.getvalue()
