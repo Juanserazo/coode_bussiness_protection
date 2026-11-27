@@ -28,27 +28,27 @@ uv run --locked --no-dev python .\coode_diagnostic.py --interactive --output .\r
 
 ### Command-line arguments
 
-Each shell example shows a test with `example.com` and an internal pilot run. Run the pilot only once the scope is authorized. It uses `coode.tech` for the email checks and `www.coode.tech` for the website checks.
+The examples use `example.com` as the email domain. Use `--web-host www.example.com` to specify a different hostname for the website checks. Only assess domains you are authorized to test.
 
 #### PowerShell on Windows
 
 ```powershell
 uv run --locked --no-dev python .\coode_diagnostic.py example.com --output .\reports
-uv run --locked --no-dev python .\coode_diagnostic.py coode.tech --web-host www.coode.tech --output .\reports
+uv run --locked --no-dev python .\coode_diagnostic.py example.com --web-host www.example.com --output .\reports
 ```
 
 #### Bash on Linux, macOS, or WSL
 
 ```bash
 uv run --locked --no-dev python ./coode_diagnostic.py example.com --output ./reports
-uv run --locked --no-dev python ./coode_diagnostic.py coode.tech --web-host www.coode.tech --output ./reports
+uv run --locked --no-dev python ./coode_diagnostic.py example.com --web-host www.example.com --output ./reports
 ```
 
 #### Git Bash on Windows
 
 ```bash
 uv run --locked --no-dev python ./coode_diagnostic.py example.com --output ./reports
-uv run --locked --no-dev python ./coode_diagnostic.py coode.tech --web-host www.coode.tech --output ./reports
+uv run --locked --no-dev python ./coode_diagnostic.py example.com --web-host www.example.com --output ./reports
 ```
 
 | Argument | Purpose |
