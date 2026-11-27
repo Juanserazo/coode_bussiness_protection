@@ -73,7 +73,7 @@ The DNS checks use `dnspython`. The web checks use `httpx` and Python's `ssl` an
 
 ## Reading the reports
 
-Each run creates a portrait PDF and a JSON file named after the email domain and a UTC timestamp. The PDF starts with a status summary and lists the evidence for each email and web check in Spanish. It includes suggested actions and verification steps where applicable. The JSON retains the existing field names and status values for integrations.
+Each run creates a portrait PDF and a JSON file named after the email domain and a UTC timestamp. The PDF starts with a status summary and, when applicable, up to three priority actions. It lists the evidence for each email and web check in Spanish. It includes suggested actions and verification steps where applicable. The JSON retains the existing fields and status values. Each finding also includes `control_id`, `objetivo` (the name or URL that was checked), and `codigo_motivo` (a stable code for the outcome). DNS evidence distinguishes a missing DNS name, a missing record, a malformed policy version or DMARC disposition, and an inconclusive query.
 
 | Status in the report | Meaning |
 |---|---|

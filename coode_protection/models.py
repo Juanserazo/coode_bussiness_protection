@@ -15,3 +15,5 @@ class Finding:
     evidence: str
     action: str = ""
     verification: str = ""
+    target: str = ""
+    reason_code: str = ""

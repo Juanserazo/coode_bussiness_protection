@@ -27,6 +27,9 @@ def write_reports(
                 "evidencia": finding.evidence,
                 "accion": finding.action,
                 "verificacion": finding.verification,
+                "control_id": finding.control.lower(),
+                "objetivo": finding.target or None,
+                "codigo_motivo": finding.reason_code or None,
             }
             for finding in findings
         ],

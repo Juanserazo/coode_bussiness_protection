@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock, call, patch
 
 import dns.exception
+import dns.resolver
 import httpx
 import pytest
 from pypdf import PdfReader
@@ -51,6 +52,10 @@ def test_checks_all_five_controls_on_the_expected_targets(
     assert [finding.control for finding in findings] == CONTROLS
     assert [finding.status for finding in findings] == [VERIFIED] * 5
     assert findings[1].evidence == "v=spf1 -all"
+    assert [finding.target for finding in findings] == [
+        DOMAIN, DOMAIN, f"_dmarc.{DOMAIN}", WEB_HOST, f"https://{WEB_HOST}/",
+    ]
+    assert all(finding.reason_code for finding in findings)
     assert "HTTP 302" in findings[4].evidence
     assert resolver.resolve.call_args_list == [
         call(DOMAIN, "MX", search=False),
@@ -90,7 +95,54 @@ def test_marks_monitoring_only_dmarc_for_review():
     finding = dns_checks.check_txt(resolver, DOMAIN, "DMARC")
 
     assert finding.status == NEEDS_REVIEW
+    assert finding.reason_code == "dmarc_monitoring_only"
     assert finding.action
+    assert finding.verification
+
+
+@pytest.mark.parametrize(
+    ("failure", "status", "reason_code", "evidence"),
+    [
+        (dns.resolver.NXDOMAIN, NEEDS_REVIEW, "dns_name_not_found", "NXDOMAIN"),
+        (dns.resolver.NoAnswer, NEEDS_REVIEW, "dns_record_not_found", "NoAnswer"),
+        (dns.exception.Timeout, UNVERIFIED, "dns_timeout", "Timeout"),
+        (dns.resolver.NoNameservers, UNVERIFIED, "dns_query_failed", "NoNameservers"),
+    ],
+    ids=["missing-name", "missing-record", "timeout", "resolver-failure"],
+)
+def test_dmarc_distinguishes_missing_records_and_dns_failures(failure, status, reason_code, evidence):
+    resolver = Mock()
+    resolver.resolve.side_effect = failure()
+
+    finding = dns_checks.check_txt(resolver, DOMAIN, "DMARC")
+
+    assert finding.target == f"_dmarc.{DOMAIN}"
+    assert finding.status == status
+    assert finding.reason_code == reason_code
+    assert evidence in finding.evidence
+    assert bool(finding.action) == (status == NEEDS_REVIEW)
+
+
+@pytest.mark.parametrize(
+    ("records", "reason_code"),
+    [
+        ([b"unrelated TXT"], "policy_not_found"),
+        ([b"v=DMARC2; p=reject"], "invalid_policy_version"),
+        ([b"v=DMARC1; p=reject", b"v=DMARC1; p=none"], "multiple_policy_records"),
+        ([b"v=DMARC1; rua=mailto:dmarc@example.com"], "invalid_dmarc_policy"),
+        ([b"v=DMARC1; p=reject; p=none"], "invalid_dmarc_policy"),
+        ([b"v=DMARC1; p=unexpected"], "invalid_dmarc_policy"),
+    ],
+    ids=["unrelated-txt", "version", "duplicates", "missing-p", "duplicate-p", "invalid-p"],
+)
+def test_dmarc_explains_missing_or_malformed_policy(records, reason_code):
+    resolver = Mock()
+    resolver.resolve.return_value = [SimpleNamespace(strings=[record]) for record in records]
+
+    finding = dns_checks.check_txt(resolver, DOMAIN, "DMARC")
+
+    assert finding.status == NEEDS_REVIEW
+    assert finding.reason_code == reason_code
     assert finding.verification
 
 
@@ -100,6 +152,7 @@ def test_writes_portrait_pdf_and_json_with_the_existing_schema(tmp_path):
         Finding(
             "SPF", NEEDS_REVIEW, "Sin política detectada.",
             "Consultar al administrador.", "Repetir la prueba.",
+            target=DOMAIN, reason_code="policy_not_found",
         ),
         Finding("DMARC", UNVERIFIED, "Consulta DNS inconclusa."),
         Finding("TLS", VERIFIED, "Certificado válido."),
@@ -123,6 +176,9 @@ def test_writes_portrait_pdf_and_json_with_the_existing_schema(tmp_path):
         "evidencia": "Sin política detectada.",
         "accion": "Consultar al administrador.",
         "verificacion": "Repetir la prueba.",
+        "control_id": "spf",
+        "objetivo": DOMAIN,
+        "codigo_motivo": "policy_not_found",
     }
     pdf = PdfReader(pdf_path)
     assert pdf_path.suffix == ".pdf"
@@ -132,6 +188,9 @@ def test_writes_portrait_pdf_and_json_with_the_existing_schema(tmp_path):
     assert "COODE BUSSINES PROTECTION" in overview
     assert DOMAIN in overview and WEB_HOST in overview
     assert "Fecha de revisión" in overview and "UTC" in overview
+    assert "Acciones prioritarias" in overview
+    assert "Consultar al administrador." in overview
+    assert "Repetir la prueba." in overview
     assert "Verificado 3" in overview
     assert "Requiere revisión 1" in overview
     assert "No verificado 1" in overview
@@ -148,6 +207,29 @@ def test_writes_portrait_pdf_and_json_with_the_existing_schema(tmp_path):
     assert "Cómo comprobar el" in details
     assert "Consultar al administrador." in details
     assert "Siguiente paso" in details
+
+
+def test_pdf_limits_priorities_and_keeps_unverified_checks_out_of_the_shortlist(tmp_path):
+    findings = [
+        Finding("MX", NEEDS_REVIEW, "MX evidence", "MX action", "MX verification"),
+        Finding("SPF", NEEDS_REVIEW, "SPF evidence", "SPF action", "SPF verification"),
+        Finding("DMARC", NEEDS_REVIEW, "DMARC evidence", "DMARC action", "DMARC verification"),
+        Finding("TLS", NEEDS_REVIEW, "TLS evidence", "TLS action", "TLS verification",
+                reason_code="tls_certificate_invalid"),
+        Finding("HTTPS", UNVERIFIED, "HTTPS evidence", "HTTPS action", "HTTPS verification"),
+    ]
+
+    _, pdf_path = reports.write_reports(DOMAIN, WEB_HOST, findings, tmp_path)
+
+    pdf = PdfReader(pdf_path)
+    overview = pdf.pages[0].extract_text()
+    assert "Acciones prioritarias" in overview
+    assert overview.index("TLS action") < overview.index("DMARC action") < overview.index("SPF action")
+    assert "MX action" not in overview
+    assert "HTTPS action" not in overview
+    details = " ".join(page.extract_text() for page in pdf.pages[1:])
+    assert "MX action" in details and "HTTPS action" in details
+    assert "Estado por control" in overview + details
 
 
 def test_long_evidence_spans_pdf_pages_without_truncation(tmp_path):
